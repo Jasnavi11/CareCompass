@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CareCompass - BedFinder Blitz</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:Inter,system-ui,sans-serif}
+body{background:#f1f5f9;color:#0f172a}
+header{background:#dc2626;color:#fff;padding:14px 16px;position:sticky;top:0;z-index:100}
+header h1{font-size:22px} header p{font-size:13px;opacity:.9}
+.emergency-bar{background:#fff;border-bottom:3px solid #dc2626;padding:12px 16px;display:flex;gap:10px;flex-wrap:wrap;position:sticky;top:62px;z-index:99}
+.btn{border:none;padding:12px 18px;border-radius:10px;font-weight:700;font-size:16px;cursor:pointer}
+.btn-red{background:#dc2626;color:#fff;flex:1}.btn-blue{background:#2563eb;color:#fff}.btn-dark{background:#0f172a;color:#fff}
+.btn-outline{background:#fff;border:2px solid #e2e8f0}
+.container{max-width:1200px;margin:auto;padding:16px}
+.controls{background:#fff;padding:16px;border-radius:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;box-shadow:0 2px 10px rgba(0,0,0,.06)}
+.controls input,.controls select{padding:11px;border:2px solid #e2e8f0;border-radius:10px;font-size:15px;flex:1;min-width:160px}
+.pills{display:flex;gap:8px;flex-wrap:wrap;width:100%}
+.pill{padding:8px 14px;border-radius:999px;border:2px solid #e2e8f0;background:#fff;cursor:pointer;font-size:14px;font-weight:600}
+.pill.active{background:#dc2626;color:#fff;border-color:#dc2626}
+.layout{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
+#map{height:520px;border-radius:14px;position:sticky;top:160px;z-index:1}
+.cards{display:flex;flex-direction:column;gap:14px}
+.card{background:#fff;border-radius:14px;padding:16px;box-shadow:0 2px 10px rgba(0,0,0,.06);border-left:6px solid #16a34a}
+.card.divert{border-left-color:#dc2626}.card.busy{border-left-color:#f59e0b}
+.card-top{display:flex;justify-content:space-between;gap:10px}
+.badge{padding:5px 10px;border-radius:999px;font-size:12px;font-weight:800;color:#fff;white-space:nowrap;height:fit-content}
+.green{background:#16a34a}.amber{background:#f59e0b}.red{background:#dc2626}.grey{background:#64748b}
+.beds{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0}
+.bed{background:#f8fafc;padding:10px;border-radius:10px;text-align:center}
+.bed b{font-size:20px;display:block}.bed span{font-size:12px;color:#64748b}
+.specs{font-size:13px;color:#475569;margin:6px 0}
+.meta{font-size:13px;color:#64748b}
+.actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.actions a,.actions button{flex:1;text-align:center;text-decoration:none}
+.admin{margin-top:16px;background:#0f172a;color:#fff;padding:18px;border-radius:14px}
+.admin h2{margin-bottom:10px}.admin-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #334155;gap:10px;flex-wrap:wrap}
+.admin-row button{width:32px;height:32px;border-radius:8px;border:none;font-size:18px;cursor:pointer;background:#fff}
+.alert-box{background:#fef3c7;border:2px solid #f59e0b;padding:12px;border-radius:10px;margin-top:12px;display:none;font-weight:600;color:#0f172a}
+@media(max-width:900px){.layout{grid-template-columns:1fr}#map{position:static;height:380px}.beds{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<header><h1>🚨 CareCompass - BedFinder Blitz</h1><p>Real-time ICU • Ventilator • Oxygen Bed Availability | Hyderabad</p></header>
+
+<div class="emergency-bar">
+  <a href="tel:108" style="flex:1"><button class="btn btn-red" style="width:100%">📞 CALL 108 AMBULANCE</button></a>
+  <button class="btn btn-dark" onclick="useMyLocation()">📍 Use My Location</button>
+  <select id="demoLoc" onchange="setDemoLoc(this.value)" style="padding:11px;border-radius:10px">
+    <option value="17.385,78.4867">Demo: Secunderabad</option>
+    <option value="17.441,78.498" selected>Demo: Dulapalli / Kompally</option>
+    <option value="17.4239,78.4738">Demo: Banjara Hills</option>
+    <option value="17.4845,78.4132">Demo: Kukatpally</option>
+    <option value="17.4485,78.3908">Demo: Madhapur / HITEC</option>
+  </select>
+</div>
+
+<div class="container">
+  <div class="controls">
+    <input id="search" placeholder="🔍 Search hospital / area... e.g. ICU, Apollo" oninput="render()">
+    <select id="maxDist" onchange="render()"><option value="100">Within Any Distance</option><option value="5">Within 5 km</option><option value="10" selected>Within 10 km</option><option value="20">Within 20 km</option></select>
+    <select id="sortBy" onchange="render()"><option value="distance">Sort: Nearest First</option><option value="icu">Sort: Most ICU Beds</option><option value="total">Sort: Most Total Beds</option></select>
+    <div class="pills" id="pills"></div>
+  </div>
+  <p id="count" style="margin:12px 2px;font-weight:700"></p>
+  <div class="layout">
+    <div id="map"></div>
+    <div class="cards" id="list"></div>
+  </div>
+
+  <div class="admin">
+    <h2>🏥 Hospital Admin Console <span style="font-size:13px;font-weight:400">(Demo PIN: 1234)</span></h2>
+    <input id="pin" placeholder="Enter PIN 1234" style="padding:10px;border-radius:8px;border:none;width:160px">
+    <button class="btn btn-red" onclick="unlockAdmin()">Unlock Console</button>
+    <div id="adminList" style="margin-top:10px"><p style="opacity:.7">Locked - Enter PIN to update bed counts in real-time.</p></div>
+  </div>
+  <div id="alertBox" class="alert-box"></div>
+  <p style="text-align:center;padding:20px;color:#64748b;font-size:13px">CareCompass © 2026 | Hackathon Project | Data refreshes via Admin Console | Emergency: 108</p>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+let hospitals = [
+{id:1,name:"City Care Hospital",area:"Kompally",lat:17.441,lon:78.498,phone:"040-47123456",general:42,icu:4,vent:3,oxy:18,specs:["Cardiology","Trauma","Cath Lab"],updated:8},
+{id:2,name:"Apollo Hospitals",area:"Jubilee Hills",lat:17.4239,lon:78.4738,phone:"040-23607777",general:68,icu:12,vent:7,oxy:25,specs:["Cardiology","Trauma","Pediatrics","Cath Lab","Burn Unit"],updated:4},
+{id:3,name:"Yashoda Hospitals",area:"Secunderabad",lat:17.4399,lon:78.4983,phone:"040-45670000",general:55,icu:8,vent:5,oxy:20,specs:["Cardiology","Trauma","Pediatrics"],updated:12},
+{id:4,name:"KIMS Hospitals",area:"Kondapur",lat:17.4622,lon:78.3568,phone:"040-44885000",general:75,icu:10,vent:6,oxy:28,specs:["Cardiology","Trauma","Cath Lab"],updated:6},
+{id:5,name:"Care Hospitals",area:"Banjara Hills",lat:17.4156,lon:78.4347,phone:"040-61656565",general:48,icu:6,vent:4,oxy:15,specs:["Cardiology","Cath Lab","Pediatrics"],updated:22},
+{id:6,name:"Sunshine Hospitals",area:"Secunderabad",lat:17.4374,lon:78.4908,phone:"040-44557777",general:30,icu:2,vent:1,oxy:8,specs:["Trauma","Pediatrics"],updated:18},
+{id:7,name:"Continental Hospitals",area:"Gachibowli",lat:17.4405,lon:78.3489,phone:"040-67000000",general:60,icu:9,vent:5,oxy:22,specs:["Cardiology","Trauma","Burn Unit"],updated:9},
+{id:8,name:"Medicover Hospitals",area:"Madhapur",lat:17.4485,lon:78.3908,phone:"040-68334444",general:52,icu:7,vent:3,oxy:19,specs:["Cardiology","Pediatrics","Cath Lab"],updated:15},
+{id:9,name:"Rainbow Children's Hospital",area:"Banjara Hills",lat:17.4125,lon:78.4485,phone:"040-44665555",general:35,icu:5,vent:4,oxy:12,specs:["Pediatrics","Trauma"],updated:7},
+{id:10,name:"NIMS Hospital",area:"Punjagutta",lat:17.4235,lon:78.4482,phone:"040-23489000",general:90,icu:14,vent:8,oxy:30,specs:["Cardiology","Trauma","Burn Unit","Pediatrics"],updated:30},
+{id:11,name:"Gandhi Hospital",area:"Secunderabad",lat:17.4284,lon:78.4985,phone:"040-27502222",general:100,icu:15,vent:9,oxy:28,specs:["Trauma","Burn Unit","Pediatrics"],updated:45},
+{id:12,name:"Osmania General Hospital",area:"Afzalgunj",lat:17.3753,lon:78.4744,phone:"040-24600146",general:85,icu:11,vent:6,oxy:24,specs:["Cardiology","Trauma","Pediatrics"],updated:65},
+{id:13,name:"Star Hospitals",area:"Banjara Hills",lat:17.4105,lon:78.4478,phone:"040-44777777",general:28,icu:3,vent:2,oxy:10,specs:["Cardiology","Cath Lab"],updated:11},
+{id:14,name:"AIG Hospitals",area:"Gachibowli",lat:17.4238,lon:78.3393,phone:"040-42442222",general:40,icu:0,vent:0,oxy:5,specs:["Cardiology","Trauma"],updated:5},
+{id:15,name:"Prime Trauma Center",area:"Kukatpally",lat:17.4845,lon:78.4132,phone:"040-48556677",general:22,icu:1,vent:1,oxy:6,specs:["Trauma","Burn Unit"],updated:20},
+];
+let userLat=17.441, userLon=78.498, activeFilters=new Set();
+let filters=["ICU","Ventilator","Oxygen","Cardiology","Trauma","Pediatrics","Cath Lab","Burn Unit"];
+let map = L.map('map').setView([userLat,userLon],12);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(map);
+let markers=[];
+function haversine(lat1,lon1,lat2,lon2){
+  const R=6371, dLat=(lat2-lat1)*Math.PI/180, dLon=(lon2-lon1)*Math.PI/180;
+  const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(a));
+}
+function status(h){
+  if(h.icu===0 && h.vent===0) return {t:"ER Full - Divert",c:"red",cls:"divert"};
+  if(h.icu<=2) return {t:"Busy",c:"amber",cls:"busy"};
+  return {t:"Beds Available",c:"green",cls:""};
+}
+function getFiltered(){
+  let q=document.getElementById('search').value.toLowerCase();
+  let maxD=+document.getElementById('maxDist').value;
+  let list=hospitals.map(h=>({...h,dist:haversine(userLat,userLon,h.lat,h.lon)}))
+    .filter(h=>h.dist<=maxD)
+    .filter(h=>(h.name+" "+h.area).toLowerCase().includes(q))
+    .filter(h=>{
+      for(let f of activeFilters){
+        if(f==="ICU" && h.icu<=0) return false;
+        if(f==="Ventilator" && h.vent<=0) return false;
+        if(f==="Oxygen" && h.oxy<=0) return false;
+        if(["Cardiology","Trauma","Pediatrics","Cath Lab","Burn Unit"].includes(f) && !h.specs.includes(f)) return false;
+      } return true;
+    });
+  let s=document.getElementById('sortBy').value;
+  if(s==="distance") list.sort((a,b)=>a.dist-b.dist);
+  if(s==="icu") list.sort((a,b)=>b.icu-a.icu);
+  if(s==="total") list.sort((a,b)=>(b.general+b.icu)-(a.general+a.icu));
+  return list;
+}
+function render(){
+  let list=getFiltered();
+  document.getElementById('count').innerText=`${list.length} hospitals found • Location: ${userLat.toFixed(3)}, ${userLon.toFixed(3)} • Within ${document.getElementById('maxDist').value} km`;
+  markers.forEach(m=>map.removeLayer(m)); markers=[];
+  document.getElementById('list').innerHTML=list.map(h=>{
+    let st=status(h);
+    let traffic=1+Math.random()*0.6;
+    let eta=Math.round((h.dist/28)*60*traffic);
+    let stale=h.updated>240?`<span class="badge grey">⚠️ STALE DATA</span>`:`<span class="meta">Last Updated: ${h.updated} mins ago</span>`;
+    return `<div class="card ${st.cls}"><div class="card-top"><div><h3>${h.name}</h3><p class="meta">📍 ${h.area} • ${h.dist.toFixed(1)} km • ⏱️ ~${eta} mins</p></div><span class="badge ${st.c}">${st.t}</span></div>
+    <div class="beds"><div class="bed"><b>${h.general}</b><span>General</span></div><div class="bed"><b>${h.icu}</b><span>ICU</span></div><div class="bed"><b>${h.vent}</b><span>Ventilator</span></div><div class="bed"><b>${h.oxy}</b><span>Oxygen</span></div></div>
+    <p class="specs">✅ ${h.specs.join(" • ")}</p><p class="meta">📞 ${h.phone} • ${stale}</p>
+    <div class="actions"><a href="tel:${h.phone}"><button class="btn btn-blue" style="width:100%">📞 Call</button></a>
+    <a href="https://www.google.com/maps/dir/?api=1&destination=${h.lat},${h.lon}" target="_blank"><button class="btn btn-red" style="width:100%">🧭 Navigate</button></a>
+    <button class="btn btn-outline" onclick="sendAlert('${h.name}')">🚑 Pre-Alert</button></div></div>`;
+  }).join('') || '<p style="padding:20px;background:#fff;border-radius:12px">No hospitals match. Clear filters.</p>';
+  list.forEach(h=>{
+    let st=status(h);
+    let color=st.c==="green"?"green":st.c==="amber"?"orange":"red";
+    let m=L.circleMarker([h.lat,h.lon],{radius:10,color:color,fillColor:color,fillOpacity:.9}).addTo(map).bindPopup(`<b>${h.name}</b><br>${h.area} • ${h.dist.toFixed(1)} km<br>ICU: ${h.icu} | Vent: ${h.vent} | Oxy: ${h.oxy}<br><b>${st.t}</b>`);
+    markers.push(m);
+  });
+}
+function renderPills(){
+  document.getElementById('pills').innerHTML=filters.map(f=>`<button class="pill ${activeFilters.has(f)?'active':''}" onclick="toggleFilter('${f}')">${f}</button>`).join('')+`<button class="pill" onclick="activeFilters.clear();renderPills();render()">Clear All</button>`;
+}
+function toggleFilter(f){ activeFilters.has(f)?activeFilters.delete(f):activeFilters.add(f); renderPills(); render(); }
+function setDemoLoc(v){ let [la,lo]=v.split(',').map(Number); userLat=la; userLon=lo; map.setView([la,lo],12); render(); }
+function useMyLocation(){ if(!navigator.geolocation) return alert("Geolocation not supported"); navigator.geolocation.getCurrentPosition(p=>{userLat=p.coords.latitude; userLon=p.coords.longitude; map.setView([userLat,userLon],12); render();},()=>alert("Location denied - using demo location")); }
+function sendAlert(name){
+  let box=document.getElementById('alertBox'); box.style.display='block';
+  box.innerHTML=`✅ Pre-Arrival Alert Sent to <b>${name}</b> Emergency Desk! 🚑 Incoming patient - ETA ~15 mins. Please keep 1 ICU bed ready.`;
+  setTimeout(()=>box.style.display='none',5000);
+}
+function unlockAdmin(){
+  if(document.getElementById('pin').value!=="1234") return alert("Wrong PIN. Demo PIN is 1234");
+  document.getElementById('adminList').innerHTML=hospitals.map(h=>`<div class="admin-row"><span><b>${h.name}</b> - ${h.area}</span><span>Gen <button onclick="updateBed(${h.id},'general',-1)">-</button> ${h.general} <button onclick="updateBed(${h.id},'general',1)">+</button> &nbsp; ICU <button onclick="updateBed(${h.id},'icu',-1)">-</button> ${h.icu} <button onclick="updateBed(${h.id},'icu',1)">+</button> &nbsp; Vent <button onclick="updateBed(${h.id},'vent',-1)">-</button> ${h.vent} <button onclick="updateBed(${h.id},'vent',1)">+</button> &nbsp; Oxy <button onclick="updateBed(${h.id},'oxy',-1)">-</button> ${h.oxy} <button onclick="updateBed(${h.id},'oxy',1)">+</button></span></div>`).join('');
+}
+function updateBed(id,field,delta){
+  let h=hospitals.find(x=>x.id===id); h[field]=Math.max(0,h[field]+delta); h.updated=0;
+  unlockAdmin(); render();
+}
+renderPills(); render();
+</script>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="app.js"></script>
+
+</body>
+</html>
